@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mjdrone"
+version = "0.1.0"
+description = "Standalone quadcopter hover project built on top of mjlab."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "mjlab",
+  "torchvision",
+]
+
+[project.scripts]
+mjdrone = "mjdrone.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+mjlab = { path = "../mjlab", editable = true }

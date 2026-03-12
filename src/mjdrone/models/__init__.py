@@ -1,0 +1,1 @@
+from mjdrone.models.attention_fusion import VisionAttentionModel as VisionAttentionModel
