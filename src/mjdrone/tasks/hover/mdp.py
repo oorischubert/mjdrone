@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 import torch
 
-from mjdrone.assets import ROAD_TILE_RADIUS, ROAD_TILE_SIZE
+from mjdrone.assets import ROAD_HALF_WIDTH, ROAD_TILE_RADIUS, ROAD_TILE_SIZE
 from mjlab.entity import Entity
 from mjlab.managers.command_manager import CommandTerm, CommandTermCfg
 from mjlab.managers.event_manager import requires_model_fields
@@ -142,6 +142,48 @@ def _road_axis_values(env, road_tile_radius: int) -> torch.Tensor:
   )
 
 
+def _sample_signed_magnitudes(
+  env,
+  num_envs: int,
+  min_abs: float,
+  max_abs: float,
+) -> torch.Tensor:
+  magnitudes = _rand_range(env, num_envs, min_abs, max_abs)
+  return _random_signs(env, num_envs) * magnitudes
+
+
+def _push_outside_axis_strips(
+  env,
+  values: torch.Tensor,
+  axis_values: torch.Tensor,
+  safe_half_width: float,
+) -> torch.Tensor:
+  deltas = values[:, None] - axis_values[None, :]
+  nearest_idx = torch.argmin(deltas.abs(), dim=1)
+  nearest_axis = axis_values[nearest_idx]
+  nearest_delta = deltas[
+    torch.arange(values.shape[0], device=env.device),
+    nearest_idx,
+  ]
+  push_sign = torch.sign(nearest_delta)
+  push_sign = torch.where(push_sign == 0.0, _random_signs(env, values.shape[0]), push_sign)
+  adjusted = nearest_axis + push_sign * safe_half_width
+  return torch.where(nearest_delta.abs() < safe_half_width, adjusted, values)
+
+
+def _push_positions_off_roads(
+  env,
+  pos: torch.Tensor,
+  road_tile_radius: int,
+  margin: float = 0.2,
+) -> torch.Tensor:
+  axis_values = _road_axis_values(env, road_tile_radius)
+  safe_half_width = ROAD_HALF_WIDTH + margin
+  x = _push_outside_axis_strips(env, pos[:, 0], axis_values, safe_half_width)
+  y = _push_outside_axis_strips(env, pos[:, 1], axis_values, safe_half_width)
+  return torch.stack([x, y, pos[:, 2]], dim=-1)
+
+
 def _enforce_min_planar_radius(pos: torch.Tensor, min_radius: float) -> torch.Tensor:
   xy = pos[:, :2]
   radius = torch.norm(xy, dim=-1, keepdim=True)
@@ -171,13 +213,84 @@ def _avoid_forward_corridor(
   return torch.stack([x, y, pos[:, 2]], dim=-1)
 
 
+def _sample_car_pose(
+  env,
+  num_envs: int,
+  road_tile_radius: int,
+  *,
+  car_idx: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+  axis_values = _road_axis_values(env, road_tile_radius)
+  if car_idx < 4:
+    center = len(axis_values) // 2
+    inner_axis_values = axis_values[center - 1 : center + 2]
+    axis_choice = inner_axis_values[
+      torch.randint(0, len(inner_axis_values), (num_envs,), device=env.device)
+    ]
+    along = _rand_range(env, num_envs, -2.0, 2.0)
+    min_radius = 1.2
+    corridor_x_min = 0.8
+    corridor_x_max = 3.0
+    corridor_half_width = 0.75
+  else:
+    axis_choice = axis_values[
+      torch.randint(0, len(axis_values), (num_envs,), device=env.device)
+    ]
+    along = _rand_range(
+      env,
+      num_envs,
+      -(road_tile_radius + 0.35) * ROAD_TILE_SIZE,
+      (road_tile_radius + 0.35) * ROAD_TILE_SIZE,
+    )
+    min_radius = 1.8
+    corridor_x_min = 1.0
+    corridor_x_max = 6.8
+    corridor_half_width = 1.1
+  lane_offset = _random_signs(env, num_envs) * _rand_range(env, num_envs, 0.28, 0.42)
+  horizontal_layout = torch.rand(num_envs, device=env.device) > 0.5
+  x = torch.where(horizontal_layout, along, axis_choice + lane_offset)
+  y = torch.where(horizontal_layout, axis_choice + lane_offset, along)
+  pos = torch.stack([x, y, torch.zeros(num_envs, device=env.device)], dim=-1)
+  pos = _enforce_min_planar_radius(pos, min_radius=min_radius)
+  pos = _avoid_forward_corridor(
+    pos,
+    x_min=corridor_x_min,
+    x_max=corridor_x_max,
+    half_width=corridor_half_width,
+  )
+  forward_choice = torch.rand(num_envs, device=env.device) > 0.5
+  horizontal_heading = torch.where(
+    forward_choice,
+    torch.zeros(num_envs, device=env.device),
+    torch.full((num_envs,), torch.pi, device=env.device),
+  )
+  vertical_heading = torch.where(
+    forward_choice,
+    torch.full((num_envs,), 0.5 * torch.pi, device=env.device),
+    torch.full((num_envs,), -0.5 * torch.pi, device=env.device),
+  )
+  heading_center = torch.where(horizontal_layout, horizontal_heading, vertical_heading)
+  yaw = heading_center + _rand_range(env, num_envs, -0.22, 0.22)
+  return pos, yaw
+
+
+def _find_planar_conflicts(
+  pos: torch.Tensor,
+  obstacle_positions: torch.Tensor,
+  min_distances: torch.Tensor,
+) -> torch.Tensor:
+  delta = pos[:, None, :2] - obstacle_positions[:, :, :2]
+  dist_sq = torch.sum(delta * delta, dim=-1)
+  return dist_sq < min_distances * min_distances
+
+
 def orient_robot_towards_positions(
   env,
   env_ids: torch.Tensor,
   target_pos_w: torch.Tensor,
   *,
   entity_name: str = "robot",
-  yaw_jitter: float = 0.12,
+  yaw_offset_range: tuple[float, float] = (0.16, 0.34),
 ) -> None:
   robot: Entity = env.scene[entity_name]
   # During reset events, root state writes update qpos immediately but derived
@@ -188,8 +301,13 @@ def orient_robot_towards_positions(
   roll, pitch, _ = euler_xyz_from_quat(robot_quat_w)
   delta = target_pos_w - robot_pos_w
   yaw = torch.atan2(delta[:, 1], delta[:, 0])
-  if yaw_jitter > 0.0:
-    yaw = yaw + sample_uniform(-yaw_jitter, yaw_jitter, yaw.shape, device=env.device)
+  if yaw_offset_range[1] > 0.0:
+    yaw = yaw + _sample_signed_magnitudes(
+      env,
+      len(env_ids),
+      yaw_offset_range[0],
+      yaw_offset_range[1],
+    )
   quat = quat_from_euler_xyz(roll, pitch, yaw)
   robot.write_root_link_pose_to_sim(torch.cat([robot_pos_w, quat], dim=-1), env_ids=env_ids)
 
@@ -299,10 +417,28 @@ def randomize_visual_scene(
     marking,
   )
 
+  target_tank_pos: torch.Tensor | None = None
+  if target_tank_name is not None:
+    radius = _rand_range(env, num_envs, 2.8, 7.4)
+    angle = _rand_range(env, num_envs, -torch.pi, torch.pi)
+    target_tank_pos = torch.stack(
+      [
+        torch.cos(angle) * radius,
+        torch.sin(angle) * radius,
+        torch.zeros(num_envs, device=env.device),
+      ],
+      dim=-1,
+    )
+
+  tree_positions: list[torch.Tensor] = []
   for idx, entity_name in enumerate(tree_names):
     entity: Entity = env.scene[entity_name]
     angle = _rand_range(env, num_envs, -torch.pi, torch.pi)
-    radius = _rand_range(env, num_envs, 4.8 + 0.12 * idx, 9.4 + 0.18 * idx)
+    if idx < 6:
+      radius = _rand_range(env, num_envs, 1.45 + 0.1 * idx, 2.35 + 0.12 * idx)
+    else:
+      outer_idx = idx - 6
+      radius = _rand_range(env, num_envs, 3.6 + 0.18 * outer_idx, 9.2 + 0.22 * outer_idx)
     pos = torch.stack(
       [
         torch.cos(angle) * radius,
@@ -311,10 +447,12 @@ def randomize_visual_scene(
       ],
       dim=-1,
     )
-    pos = _avoid_forward_corridor(pos, x_min=1.2, x_max=8.4, half_width=1.8)
+    pos = _push_positions_off_roads(env, pos, road_tile_radius, margin=0.24)
+    pos = _avoid_forward_corridor(pos, x_min=0.8, x_max=3.2, half_width=0.7)
     yaw = _rand_range(env, num_envs, -torch.pi, torch.pi)
     pose = torch.cat([origins + pos, _sample_yaw_quat(yaw)], dim=-1)
     entity.write_mocap_pose_to_sim(pose, env_ids)
+    tree_positions.append(pos)
 
     canopy = torch.stack(
       [
@@ -348,38 +486,53 @@ def randomize_visual_scene(
     ],
     device=env.device,
   )
+  tree_obstacle_positions = torch.stack(tree_positions, dim=1)
+  tree_obstacle_clearances = torch.full(
+    (num_envs, len(tree_positions)),
+    1.2,
+    device=env.device,
+  )
+  tank_obstacle_clearances = (
+    torch.full((num_envs, 1), 1.8, device=env.device)
+    if target_tank_pos is not None
+    else None
+  )
+  placed_car_positions: list[torch.Tensor] = []
   for idx, entity_name in enumerate(car_names):
     entity = env.scene[entity_name]
-    axis_values = _road_axis_values(env, road_tile_radius)
-    axis_choice = axis_values[torch.randint(0, len(axis_values), (num_envs,), device=env.device)]
-    lane_offset = _random_signs(env, num_envs) * _rand_range(env, num_envs, 0.28, 0.42)
-    along = _rand_range(
-      env,
-      num_envs,
-      -(road_tile_radius + 0.35) * ROAD_TILE_SIZE,
-      (road_tile_radius + 0.35) * ROAD_TILE_SIZE,
-    )
-    horizontal_layout = torch.rand(num_envs, device=env.device) > 0.5
-    x = torch.where(horizontal_layout, along, axis_choice + lane_offset)
-    y = torch.where(horizontal_layout, axis_choice + lane_offset, along)
-    pos = torch.stack([x, y, torch.zeros(num_envs, device=env.device)], dim=-1)
-    pos = _enforce_min_planar_radius(pos, min_radius=2.25)
-    pos = _avoid_forward_corridor(pos, x_min=1.2, x_max=8.2, half_width=1.5)
-    forward_choice = torch.rand(num_envs, device=env.device) > 0.5
-    horizontal_heading = torch.where(
-      forward_choice,
-      torch.zeros(num_envs, device=env.device),
-      torch.full((num_envs,), torch.pi, device=env.device),
-    )
-    vertical_heading = torch.where(
-      forward_choice,
-      torch.full((num_envs,), 0.5 * torch.pi, device=env.device),
-      torch.full((num_envs,), -0.5 * torch.pi, device=env.device),
-    )
-    heading_center = torch.where(horizontal_layout, horizontal_heading, vertical_heading)
-    yaw = heading_center + _rand_range(env, num_envs, -0.22, 0.22)
+    pos, yaw = _sample_car_pose(env, num_envs, road_tile_radius, car_idx=idx)
+    for _ in range(10):
+      obstacle_positions = [tree_obstacle_positions]
+      obstacle_clearances = [tree_obstacle_clearances]
+      if target_tank_pos is not None and tank_obstacle_clearances is not None:
+        obstacle_positions.append(target_tank_pos.unsqueeze(1))
+        obstacle_clearances.append(tank_obstacle_clearances)
+      if placed_car_positions:
+        obstacle_positions.append(torch.stack(placed_car_positions, dim=1))
+        obstacle_clearances.append(
+          torch.full(
+            (num_envs, len(placed_car_positions)),
+            1.35,
+            device=env.device,
+          )
+        )
+      combined_positions = torch.cat(obstacle_positions, dim=1)
+      combined_clearances = torch.cat(obstacle_clearances, dim=1)
+      conflict_mask = _find_planar_conflicts(pos, combined_positions, combined_clearances).any(dim=1)
+      if not torch.any(conflict_mask):
+        break
+      resample_count = int(conflict_mask.sum().item())
+      resampled_pos, resampled_yaw = _sample_car_pose(
+        env,
+        resample_count,
+        road_tile_radius,
+        car_idx=idx,
+      )
+      pos[conflict_mask] = resampled_pos
+      yaw[conflict_mask] = resampled_yaw
     pose = torch.cat([origins + pos, _sample_yaw_quat(yaw)], dim=-1)
     entity.write_mocap_pose_to_sim(pose, env_ids)
+    placed_car_positions.append(pos)
 
     palette_idx = torch.randint(0, len(car_palette), (num_envs,), device=env.device)
     car_color = car_palette[palette_idx]
@@ -426,22 +579,15 @@ def randomize_visual_scene(
     _set_entity_color(env, env_ids, entity_name, "stripe", stripe_palette[stripe_idx])
 
   if target_tank_name is not None:
+    assert target_tank_pos is not None
     entity = env.scene[target_tank_name]
-    radius = _rand_range(env, num_envs, 2.8, 7.4)
-    angle = _rand_range(env, num_envs, -torch.pi, torch.pi)
-    x = torch.cos(angle) * radius
-    y = torch.sin(angle) * radius
-    pos = torch.stack(
-      [x, y, torch.zeros(num_envs, device=env.device)],
-      dim=-1,
-    )
     yaw_choices = torch.tensor(
       [0.0, 0.0, torch.pi, 0.5 * torch.pi, -0.5 * torch.pi],
       device=env.device,
     )
     yaw = yaw_choices[torch.randint(0, len(yaw_choices), (num_envs,), device=env.device)]
     yaw = yaw + _rand_range(env, num_envs, -0.1, 0.1)
-    pose = torch.cat([origins + pos, _sample_yaw_quat(yaw)], dim=-1)
+    pose = torch.cat([origins + target_tank_pos, _sample_yaw_quat(yaw)], dim=-1)
     entity.write_mocap_pose_to_sim(pose, env_ids)
 
     _set_entity_color(
@@ -465,7 +611,7 @@ def randomize_visual_scene(
       "barrel_tip",
       torch.tensor([0.08, 0.08, 0.08, 1.0], device=env.device).repeat(num_envs, 1),
     )
-    orient_robot_towards_positions(env, env_ids, origins + pos)
+    orient_robot_towards_positions(env, env_ids, origins + target_tank_pos)
 
 
 def target_position_error_b(env, command_name: str, entity_name: str = "robot") -> torch.Tensor:
