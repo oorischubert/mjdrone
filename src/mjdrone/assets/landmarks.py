@@ -14,6 +14,10 @@ ROAD_TILE_SIZE = 3.6
 ROAD_HALF_WIDTH = 0.62
 ROAD_BRANCH_HALF_LENGTH = (ROAD_TILE_SIZE * 0.5 - ROAD_HALF_WIDTH) * 0.5
 GROUND_HALF_EXTENT = (ROAD_TILE_RADIUS + 1.2) * ROAD_TILE_SIZE
+GRASS_MAIN_HALF_HEIGHT = 0.0005
+GRASS_INNER_HALF_HEIGHT = 0.00035
+ROAD_HALF_HEIGHT = 0.00045
+LANE_HALF_HEIGHT = 0.00018
 
 
 def get_ground_decor_cfg() -> EntityCfg:
@@ -22,8 +26,8 @@ def get_ground_decor_cfg() -> EntityCfg:
   body.add_geom(
     name="grass_main",
     type=mujoco.mjtGeom.mjGEOM_BOX,
-    pos=(0.0, 0.0, 0.0015),
-    size=(GROUND_HALF_EXTENT, GROUND_HALF_EXTENT, 0.0015),
+    pos=(0.0, 0.0, GRASS_MAIN_HALF_HEIGHT),
+    size=(GROUND_HALF_EXTENT, GROUND_HALF_EXTENT, GRASS_MAIN_HALF_HEIGHT),
     rgba=(0.24, 0.45, 0.2, 1.0),
     contype=0,
     conaffinity=0,
@@ -31,15 +35,15 @@ def get_ground_decor_cfg() -> EntityCfg:
   body.add_geom(
     name="grass_inner",
     type=mujoco.mjtGeom.mjGEOM_BOX,
-    pos=(0.0, 0.0, 0.0028),
-    size=(GROUND_HALF_EXTENT - 1.8, GROUND_HALF_EXTENT - 1.8, 0.0011),
+    pos=(0.0, 0.0, 0.00145),
+    size=(GROUND_HALF_EXTENT - 1.8, GROUND_HALF_EXTENT - 1.8, GRASS_INNER_HALF_HEIGHT),
     rgba=(0.28, 0.5, 0.23, 1.0),
     contype=0,
     conaffinity=0,
   )
 
-  road_z = 0.004
-  lane_z = 0.0054
+  road_z = 0.0023
+  lane_z = 0.00325
   for row in range(-ROAD_TILE_RADIUS, ROAD_TILE_RADIUS + 1):
     for col in range(-ROAD_TILE_RADIUS, ROAD_TILE_RADIUS + 1):
       x = col * ROAD_TILE_SIZE
@@ -51,7 +55,7 @@ def get_ground_decor_cfg() -> EntityCfg:
         name=f"road_center_{row_idx}_{col_idx}",
         type=mujoco.mjtGeom.mjGEOM_BOX,
         pos=(x, y, road_z),
-        size=(ROAD_HALF_WIDTH, ROAD_HALF_WIDTH, 0.0012),
+        size=(ROAD_HALF_WIDTH, ROAD_HALF_WIDTH, ROAD_HALF_HEIGHT),
         rgba=(0.2, 0.2, 0.22, 1.0),
         contype=0,
         conaffinity=0,
@@ -60,7 +64,7 @@ def get_ground_decor_cfg() -> EntityCfg:
         name=f"road_north_{row_idx}_{col_idx}",
         type=mujoco.mjtGeom.mjGEOM_BOX,
         pos=(x, y + ROAD_HALF_WIDTH + ROAD_BRANCH_HALF_LENGTH, road_z),
-        size=(ROAD_HALF_WIDTH, ROAD_BRANCH_HALF_LENGTH, 0.0012),
+        size=(ROAD_HALF_WIDTH, ROAD_BRANCH_HALF_LENGTH, ROAD_HALF_HEIGHT),
         rgba=(0.2, 0.2, 0.22, 1.0),
         contype=0,
         conaffinity=0,
@@ -69,7 +73,7 @@ def get_ground_decor_cfg() -> EntityCfg:
         name=f"road_south_{row_idx}_{col_idx}",
         type=mujoco.mjtGeom.mjGEOM_BOX,
         pos=(x, y - ROAD_HALF_WIDTH - ROAD_BRANCH_HALF_LENGTH, road_z),
-        size=(ROAD_HALF_WIDTH, ROAD_BRANCH_HALF_LENGTH, 0.0012),
+        size=(ROAD_HALF_WIDTH, ROAD_BRANCH_HALF_LENGTH, ROAD_HALF_HEIGHT),
         rgba=(0.2, 0.2, 0.22, 1.0),
         contype=0,
         conaffinity=0,
@@ -78,7 +82,7 @@ def get_ground_decor_cfg() -> EntityCfg:
         name=f"road_east_{row_idx}_{col_idx}",
         type=mujoco.mjtGeom.mjGEOM_BOX,
         pos=(x + ROAD_HALF_WIDTH + ROAD_BRANCH_HALF_LENGTH, y, road_z),
-        size=(ROAD_BRANCH_HALF_LENGTH, ROAD_HALF_WIDTH, 0.0012),
+        size=(ROAD_BRANCH_HALF_LENGTH, ROAD_HALF_WIDTH, ROAD_HALF_HEIGHT),
         rgba=(0.2, 0.2, 0.22, 1.0),
         contype=0,
         conaffinity=0,
@@ -87,7 +91,7 @@ def get_ground_decor_cfg() -> EntityCfg:
         name=f"road_west_{row_idx}_{col_idx}",
         type=mujoco.mjtGeom.mjGEOM_BOX,
         pos=(x - ROAD_HALF_WIDTH - ROAD_BRANCH_HALF_LENGTH, y, road_z),
-        size=(ROAD_BRANCH_HALF_LENGTH, ROAD_HALF_WIDTH, 0.0012),
+        size=(ROAD_BRANCH_HALF_LENGTH, ROAD_HALF_WIDTH, ROAD_HALF_HEIGHT),
         rgba=(0.2, 0.2, 0.22, 1.0),
         contype=0,
         conaffinity=0,
@@ -98,7 +102,7 @@ def get_ground_decor_cfg() -> EntityCfg:
         name=f"lane_north_{row_idx}_{col_idx}",
         type=mujoco.mjtGeom.mjGEOM_BOX,
         pos=(x, y + ROAD_HALF_WIDTH + ROAD_BRANCH_HALF_LENGTH, lane_z),
-        size=(0.045, lane_half_length, 0.0007),
+        size=(0.045, lane_half_length, LANE_HALF_HEIGHT),
         rgba=(0.95, 0.94, 0.86, 1.0),
         contype=0,
         conaffinity=0,
@@ -107,7 +111,7 @@ def get_ground_decor_cfg() -> EntityCfg:
         name=f"lane_south_{row_idx}_{col_idx}",
         type=mujoco.mjtGeom.mjGEOM_BOX,
         pos=(x, y - ROAD_HALF_WIDTH - ROAD_BRANCH_HALF_LENGTH, lane_z),
-        size=(0.045, lane_half_length, 0.0007),
+        size=(0.045, lane_half_length, LANE_HALF_HEIGHT),
         rgba=(0.95, 0.94, 0.86, 1.0),
         contype=0,
         conaffinity=0,
@@ -116,7 +120,7 @@ def get_ground_decor_cfg() -> EntityCfg:
         name=f"lane_east_{row_idx}_{col_idx}",
         type=mujoco.mjtGeom.mjGEOM_BOX,
         pos=(x + ROAD_HALF_WIDTH + ROAD_BRANCH_HALF_LENGTH, y, lane_z),
-        size=(lane_half_length, 0.045, 0.0007),
+        size=(lane_half_length, 0.045, LANE_HALF_HEIGHT),
         rgba=(0.95, 0.94, 0.86, 1.0),
         contype=0,
         conaffinity=0,
@@ -125,7 +129,7 @@ def get_ground_decor_cfg() -> EntityCfg:
         name=f"lane_west_{row_idx}_{col_idx}",
         type=mujoco.mjtGeom.mjGEOM_BOX,
         pos=(x - ROAD_HALF_WIDTH - ROAD_BRANCH_HALF_LENGTH, y, lane_z),
-        size=(lane_half_length, 0.045, 0.0007),
+        size=(lane_half_length, 0.045, LANE_HALF_HEIGHT),
         rgba=(0.95, 0.94, 0.86, 1.0),
         contype=0,
         conaffinity=0,
