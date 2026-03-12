@@ -24,7 +24,7 @@ from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.scene import SceneCfg
 from mjlab.sensor import BuiltinSensorCfg, CameraSensorCfg, ContactMatch, ContactSensorCfg, ObjRef
 from mjlab.sim import MujocoCfg, SimulationCfg
-from mjlab.terrains import TerrainImporterCfg
+from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
 
@@ -240,7 +240,7 @@ def make_hover_env_cfg(
     scene=SceneCfg(
       num_envs=num_envs,
       env_spacing=24.0,
-      terrain=TerrainImporterCfg(terrain_type="plane"),
+      terrain=TerrainEntityCfg(terrain_type="plane"),
       entities={
         "robot": get_quadcopter_cfg(),
         GROUND_ENTITY_NAME: get_ground_decor_cfg(),

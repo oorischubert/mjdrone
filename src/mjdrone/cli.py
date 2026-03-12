@@ -78,7 +78,28 @@ def _default_log_root(experiment_name: str) -> Path:
 
 
 def _resolve_latest_checkpoint(log_root: Path) -> Path:
-  return get_checkpoint_path(log_root, checkpoint=r"model_.*\.pt")
+  checkpoint = get_checkpoint_path(log_root, checkpoint=r"model_.*\.pt")
+  if checkpoint.stat().st_size > 0:
+    return checkpoint
+
+  run_dir = checkpoint.parent
+  candidates = sorted(
+    (
+      path
+      for path in run_dir.iterdir()
+      if path.is_file() and path.name.startswith("model_") and path.suffix == ".pt"
+    ),
+    key=lambda path: path.name,
+    reverse=True,
+  )
+  for candidate in candidates:
+    if candidate.stat().st_size > 0:
+      print(
+        f"[WARN] Skipping empty checkpoint {checkpoint.name}; using {candidate.name} instead."
+      )
+      return candidate
+
+  raise ValueError(f"No non-empty checkpoint found in {run_dir}")
 
 
 def _env_has_camera_sensors(env: ManagerBasedRlEnv) -> bool:
@@ -166,6 +187,8 @@ def play(args: argparse.Namespace) -> None:
       checkpoint = Path(args.checkpoint).expanduser().resolve()
       if not checkpoint.exists() or not checkpoint.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
+      if checkpoint.stat().st_size == 0:
+        raise ValueError(f"Checkpoint is empty: {checkpoint}")
     else:
       checkpoint = _resolve_latest_checkpoint(_default_log_root(runner_cfg.experiment_name))
     print(f"[INFO] Loading checkpoint: {checkpoint}")

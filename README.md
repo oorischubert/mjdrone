@@ -1,6 +1,6 @@
 # mjdrone
 
-`mjdrone` is a standalone multimodal drone RL project built on top of the sibling [`mjlab`](../mjlab) repository.
+`mjdrone` is a standalone multimodal drone RL project built on top of the [`mjlab`](https://github.com/mujocolab/mjlab) repository.
 
 The project now has three defining characteristics:
 
@@ -105,16 +105,6 @@ The model is intentionally split into a fast control/state path and a visual con
 - the **vision path** handles the camera image through a pretrained ResNet backbone,
 - the **fusion block** lets state decide what visual evidence matters.
 
-#### Why Not YOLO
-
-Using YOLO directly for this project would be the wrong abstraction.
-
-YOLO is an object detector. It is useful when you already have bounding-box supervision and want explicit detections. This project is an end-to-end RL control problem, and the policy needs dense scene features for stabilization, obstacle avoidance, and target pursuit, not just detector boxes.
-
-So instead of putting a detector in the loop, the project now uses a pretrained image backbone and fine-tunes it for control. That gives you transferable visual features without forcing a separate detection dataset or hard-wiring the policy around detector outputs.
-
-LoRA-style adaptation is possible in principle, but for this codebase the higher-value first step is selective fine-tuning of a pretrained backbone. It is simpler, better aligned with the current model, and much easier to maintain.
-
 #### Pretrained Vision Encoder
 
 The vision branch now uses:
@@ -124,8 +114,6 @@ The vision branch now uses:
 - feature extraction up to `layer3`,
 - only the later visual stage (`layer3`) left trainable by default,
 - shared visual encoder weights between actor and critic during PPO.
-
-This gives the policy a stronger starting point than a randomly initialized CNN while keeping the multimodal attention and control head task-specific.
 
 #### Why The IMU Matters
 
@@ -213,8 +201,6 @@ Design intent:
 ### Visual Scene Randomization
 
 The current project includes **visual scene randomization**, not full dynamics/domain randomization.
-
-That distinction matters.
 
 Current visual randomization changes the rendered scene so the camera policy must generalize across layouts. It does **not** yet change the underlying flight dynamics.
 
@@ -363,21 +349,14 @@ For camera-based inspection, `viser` is the better option because it shows the o
 
 ## Setup
 
-Expected sibling layout:
-
-```text
-/home/oorischubert/
-├── mjlab/
-└── mjdrone/
-```
-
 From `mjdrone/`:
 
 ```bash
 uv sync
 ```
 
-`pyproject.toml` points to `../mjlab` as an editable dependency.
+This installs the published `mjlab==1.2.0` dependency automatically. A local
+`mjlab` checkout is not required.
 
 ## Commands
 

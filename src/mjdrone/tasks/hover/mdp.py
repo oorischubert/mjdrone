@@ -11,7 +11,6 @@ from mjlab.entity import Entity
 from mjlab.managers.command_manager import CommandTerm, CommandTermCfg
 from mjlab.managers.event_manager import requires_model_fields
 from mjlab.sensor import ContactSensor
-from mjlab.utils.image import enhance_rgb_tensor
 from mjlab.utils.lab_api.math import euler_xyz_from_quat
 from mjlab.utils.lab_api.math import quat_apply, quat_inv, sample_uniform
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
@@ -86,8 +85,7 @@ def camera_rgb(env, sensor_name: str) -> torch.Tensor:
   sensor = env.scene[sensor_name]
   rgb = sensor.data.rgb
   assert rgb is not None, f"Camera '{sensor_name}' has no RGB data."
-  rgb = rgb.permute(0, 3, 1, 2).float() / 255.0
-  return enhance_rgb_tensor(rgb)
+  return rgb.permute(0, 3, 1, 2).float() / 255.0
 
 
 def _resolve_env_ids(env, env_ids: torch.Tensor | slice | None) -> torch.Tensor:
