@@ -6,7 +6,7 @@ import textwrap
 
 import mujoco
 
-from mjlab.actuator import XmlMotorActuatorCfg
+from mjlab.actuator import XmlActuatorCfg
 from mjlab.actuator.actuator import TransmissionType
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 
@@ -16,7 +16,6 @@ def _build_quadcopter_spec() -> mujoco.MjSpec:
     """
     <mujoco model="mjdrone_quadcopter">
       <compiler angle="radian" autolimits="true"/>
-      <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81"/>
 
       <default>
         <geom rgba="0.35 0.38 0.42 1"/>
@@ -97,7 +96,7 @@ def get_quadcopter_cfg() -> EntityCfg:
     ),
     articulation=EntityArticulationInfoCfg(
       actuators=(
-        XmlMotorActuatorCfg(
+        XmlActuatorCfg(
           target_names_expr=("rotor_fl", "rotor_fr", "rotor_rl", "rotor_rr"),
           transmission_type=TransmissionType.SITE,
         ),

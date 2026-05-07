@@ -355,7 +355,7 @@ From `mjdrone/`:
 uv sync
 ```
 
-This installs the published `mjlab==1.2.0` dependency automatically. A local
+This installs the published `mjlab==1.3.0` dependency automatically. A local
 `mjlab` checkout is not required.
 
 ## Commands

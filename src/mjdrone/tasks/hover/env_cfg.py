@@ -264,8 +264,8 @@ def make_hover_env_cfg(
         iterations=6,
         ls_iterations=12,
       ),
-      njmax=2048,
-      nconmax=512,
+      njmax=4096,
+      nconmax=1024,
     ),
     viewer=ViewerConfig(
       origin_type=ViewerConfig.OriginType.ASSET_BODY,
